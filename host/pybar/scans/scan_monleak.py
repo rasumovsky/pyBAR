@@ -21,7 +21,7 @@ class MonLeakScan(Fei4RunBase):
     ''' Mon leak scan
     '''
     _default_run_conf = {
-        "repeat_command": 1000,
+        "repeat_command": 1,
         "scan_parameters": [('column', None),
                             ('row', None),
                             ('GADCout', None),
@@ -41,6 +41,10 @@ class MonLeakScan(Fei4RunBase):
         
         # Settings for the mon-leak scan:
         self.register.set_global_register_value("GADCStart",1)
+        self.register.set_global_register_value("GADCSel",7)# for readback test read,write
+        self.register.set_global_register_value("GADCVref",170)
+        self.register.set_global_register_value("GADCCompBias",100)
+        self.register.set_global_register_value("EventLimit",10)
         self.register.set_global_register_value("TempSensDisable",1)
         self.register.set_global_register_value("EN_PLL",1)
         self.register.set_global_register_value("GateHitOr",1)
@@ -51,7 +55,8 @@ class MonLeakScan(Fei4RunBase):
         self.register.set_global_register_value("SR_Clr",0)
         self.register.set_global_register_value("SR_Clock",0)
         self.register.set_global_register_value("StopClkPulse",0)
-        commands.extend(self.register.get_commands("WrRegister", name=["GADCStart","TempSensDisable","EN_PLL","GateHitOr","CalEn","Efuse_Sense","Latch_En","ReadErrorReq","SR_Clr","SR_Clock","StopClkPulse"]))
+        self.register.set_global_register_value("Trig_Count",0)
+        commands.extend(self.register.get_commands("WrRegister", name=["GADCStart","GADCSel","GADCVref","GADCCompBias","EventLimit","TempSensDisable","EN_PLL","GateHitOr","CalEn","Efuse_Sense","Latch_En","ReadErrorReq","SR_Clr","SR_Clock","StopClkPulse","Trig_Count"]))
         self.register_utils.send_commands(commands)
 
     def scan(self):
@@ -112,21 +117,32 @@ class MonLeakScan(Fei4RunBase):
                 
                 self.dut['tdc_rx2']['EN_ARMING'] = True
                 
+                #prevents the buffer from filling up:
+                #self.dut['sram']['RESET']
+
                 # read the value of the GADCout and GADCStatus 
                 GADCout = self.register.get_global_register_value("GADCout")
                 GADCStatus = self.register.get_global_register_value("GADCStatus")
                 logging.info('GADCout = %d, GACDStatus = %d' % (GADCout, GADCStatus))
                 
                 # Definition of command to send global pulse and wait 320 clock cycles:
-                scan_globalpulse_command = self.register.get_commands("GlobalPulse",Width=63)[0] + self.register.get_commands("zeros", length=320)[0]
+                #GADCSelRB 3 bit, ?
+                scan_globalpulse_command = self.register.get_commands("GlobalPulse",Width=5)[0] + self.register.get_commands("zeros", length=320)[0] + self.register.get_commands("LV1")[0] + self.register.get_commands("LV1")[0] + self.register.get_commands("zeros", length=200)[0]
+
+                commands = []
+                commands.extend(self.register.get_commands("RunMode"))
+                self.register_utils.send_commands(commands)
                 
                 with self.readout(column=column, row=row, GADCout=GADCout, GADCStatus=GADCStatus):
                     self.register_utils.send_command(command=scan_globalpulse_command, repeat=self.repeat_command)
-
+                
                 # read the value of the GADCout and GADCStatus 
                 GADCout = self.register.get_global_register_value("GADCout")
                 GADCStatus = self.register.get_global_register_value("GADCStatus")
-                logging.info('GADCout = %d, GACDStatus = %d' % (GADCout, GADCStatus))
+                GADCSel = self.register.get_global_register_value("GADCSel")
+                GADCSelRB = self.register.get_global_register_value("GADCSelRB")
+                val = self.register.get_global_register_value("EOCHLSkipped")
+                logging.info('EOCHLSkipped = %d, GADCSel = %d, GADCSelRB = %d, GADCout = %d, GACDStatus = %d' % (val, GADCSel, GADCSelRB, GADCout, GADCStatus))
     
                 self.dut['tdc_rx2']['EN_ARMING'] = False
                 self.dut['tdc_rx2']['ENABLE'] = False
